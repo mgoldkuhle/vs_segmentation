@@ -101,4 +101,5 @@ def downsample_seg_for_ds_transform2(seg, ds_scales=((1, 1, 1), (0.5, 0.5, 0.5),
                 for c in range(seg.shape[1]):
                     out_seg[b, c] = resize_segmentation(seg[b, c], new_shape[2:], order)
             output.append(out_seg)
+    print(output[0].shape, output[1].shape,output[2].shape)
     return output

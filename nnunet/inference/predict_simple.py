@@ -76,6 +76,7 @@ def main():
                                                                                "--num_parts=n (each with a different "
                                                                                "GPU (for example via "
                                                                                "CUDA_VISIBLE_DEVICES=X)")
+    parser.add_argument("--format", type=str, required=False,default="nifti", help="the format of input and output")
 
     parser.add_argument("--num_parts", type=int, required=False, default=1,
                         help="Used to parallelize the prediction of "
@@ -125,6 +126,7 @@ def main():
     args = parser.parse_args()
     input_folder = args.input_folder
     output_folder = args.output_folder
+    img_format = args.format
     part_id = args.part_id
     num_parts = args.num_parts
     folds = args.folds
@@ -195,7 +197,7 @@ def main():
                                   args.plans_identifier)
         assert isdir(model_folder_name), "model output folder not found. Expected: %s" % model_folder_name
         lowres_output_folder = join(output_folder, "3d_lowres_predictions")
-        predict_from_folder(model_folder_name, input_folder, lowres_output_folder, folds, False,
+        predict_from_folder(model_folder_name, input_folder, lowres_output_folder, img_format,folds, False,
                             num_threads_preprocessing, num_threads_nifti_save, None, part_id, num_parts, not disable_tta,
                             overwrite_existing=overwrite_existing, mode=mode, overwrite_all_in_gpu=all_in_gpu,
                             mixed_precision=not args.disable_mixed_precision,
@@ -214,7 +216,7 @@ def main():
     print("using model stored in ", model_folder_name)
     assert isdir(model_folder_name), "model output folder not found. Expected: %s" % model_folder_name
 
-    predict_from_folder(model_folder_name, input_folder, output_folder, folds, save_npz, num_threads_preprocessing,
+    predict_from_folder(model_folder_name, input_folder, output_folder, img_format, folds, save_npz, num_threads_preprocessing,
                         num_threads_nifti_save, lowres_segmentations, part_id, num_parts, not disable_tta,
                         overwrite_existing=overwrite_existing, mode=mode, overwrite_all_in_gpu=all_in_gpu,
                         mixed_precision=not args.disable_mixed_precision,

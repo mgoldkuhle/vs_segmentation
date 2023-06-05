@@ -414,7 +414,7 @@ class nnUNetTrainer(NetworkTrainer):
                                   pad_mode="constant", pad_sides=self.pad_all_sides, memmap_mode='r')
         return dl_tr, dl_val
 
-    def preprocess_patient(self, input_files):
+    def preprocess_patient(self, input_files, img_format):
         """
         Used to predict new unseen data. Not used for the preprocessing of the training/test data
         :param input_files:
@@ -436,8 +436,9 @@ class nnUNetTrainer(NetworkTrainer):
                                                preprocessor_name
         preprocessor = preprocessor_class(self.normalization_schemes, self.use_mask_for_norm,
                                           self.transpose_forward, self.intensity_properties)
-
-        d, s, properties = preprocessor.preprocess_test_case(input_files,
+        
+        print(img_format)
+        d, s, properties = preprocessor.preprocess_test_case(input_files, img_format,
                                                              self.plans['plans_per_stage'][self.stage][
                                                                  'current_spacing'])
         return d, s, properties

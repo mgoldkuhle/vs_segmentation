@@ -26,10 +26,12 @@ default_cascade_trainer = "nnUNetTrainerV2CascadeFullRes"
 PLEASE READ paths.md FOR INFORMATION TO HOW TO SET THIS UP
 """
 
-base = os.environ['nnUNet_raw_data_base'] if "nnUNet_raw_data_base" in os.environ.keys() else None
-preprocessing_output_dir = os.environ['nnUNet_preprocessed'] if "nnUNet_preprocessed" in os.environ.keys() else None
+#base = os.environ['nnUNet_raw_data_base'] if "nnUNet_raw_data_base" in os.environ.keys() else None
+base = "/exports/lkeb-hpc/ychen/01_data/nnUnet_data/nnUNet_raw/"
+#preprocessing_output_dir = os.environ['nnUNet_preprocessed'] if "nnUNet_preprocessed" in os.environ.keys() else None
+preprocessing_output_dir = "/exports/lkeb-hpc/ychen/01_data/nnUnet_data/nnUNet_preprocessed/"
 network_training_output_dir_base = os.path.join(os.environ['RESULTS_FOLDER']) if "RESULTS_FOLDER" in os.environ.keys() else None
-
+print(network_training_output_dir_base)
 if base is not None:
     nnUNet_raw_data = join(base, "nnUNet_raw_data")
     nnUNet_cropped_data = join(base, "nnUNet_cropped_data")
@@ -40,13 +42,14 @@ else:
           "are already present on your system. nnU-Net cannot be used for experiment planning and preprocessing like "
           "this. If this is not intended, please read documentation/setting_up_paths.md for information on how to set this up properly.")
     nnUNet_cropped_data = nnUNet_raw_data = None
-
+'''
 if preprocessing_output_dir is not None:
     maybe_mkdir_p(preprocessing_output_dir)
 else:
     print("nnUNet_preprocessed is not defined and nnU-Net can not be used for preprocessing "
           "or training. If this is not intended, please read documentation/setting_up_paths.md for information on how to set this up.")
     preprocessing_output_dir = None
+'''
 
 if network_training_output_dir_base is not None:
     network_training_output_dir = join(network_training_output_dir_base, my_output_identifier)

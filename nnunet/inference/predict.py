@@ -19,20 +19,20 @@ from typing import Tuple, Union, List
 
 import numpy as np
 from batchgenerators.augmentations.utils import resize_segmentation
-from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax, save_segmentation_nifti
+from nnunet.inference.segmentation_export import save_segmentation_nifti_from_softmax, save_segmentation_dicom_from_softmax, save_segmentation_nifti
 from batchgenerators.utilities.file_and_folder_operations import *
 from multiprocessing import Process, Queue
 import torch
 import SimpleITK as sitk
 import shutil
 from multiprocessing import Pool
-from nnunet.postprocessing.connected_components import load_remove_save, load_postprocessing
+from nnunet.postprocessing.connected_components import load_remove_save, load_remove_save_dcm, load_postprocessing
 from nnunet.training.model_restore import load_model_and_checkpoint_files
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.utilities.one_hot_encoding import to_one_hot
+import sys
 
-
-def preprocess_save_to_queue(preprocess_fn, q, list_of_lists, output_files, segs_from_prev_stage, classes,
+def preprocess_save_to_queue(preprocess_fn, q, list_of_lists, output_files, img_format, segs_from_prev_stage, classes,
                              transpose_forward):
     # suppress output
     # sys.stdout = open(os.devnull, 'w')
@@ -42,8 +42,9 @@ def preprocess_save_to_queue(preprocess_fn, q, list_of_lists, output_files, segs
         try:
             output_file = output_files[i]
             print("preprocessing", output_file)
-            d, _, dct = preprocess_fn(l)
+            d, _, dct = preprocess_fn(l,img_format)
             # print(output_file, dct)
+            print(segs_from_prev_stage[i])
             if segs_from_prev_stage[i] is not None:
                 assert isfile(segs_from_prev_stage[i]) and segs_from_prev_stage[i].endswith(
                     ".nii.gz"), "segs_from_prev_stage" \
@@ -90,7 +91,7 @@ def preprocess_save_to_queue(preprocess_fn, q, list_of_lists, output_files, segs
     # sys.stdout = sys.__stdout__
 
 
-def preprocess_multithreaded(trainer, list_of_lists, output_files, num_processes=2, segs_from_prev_stage=None):
+def preprocess_multithreaded(trainer, list_of_lists, output_files, img_format, num_processes=2, segs_from_prev_stage=None):
     if segs_from_prev_stage is None:
         segs_from_prev_stage = [None] * len(list_of_lists)
 
@@ -104,6 +105,7 @@ def preprocess_multithreaded(trainer, list_of_lists, output_files, num_processes
         pr = Process(target=preprocess_save_to_queue, args=(trainer.preprocess_patient, q,
                                                             list_of_lists[i::num_processes],
                                                             output_files[i::num_processes],
+                                                            img_format, 
                                                             segs_from_prev_stage[i::num_processes],
                                                             classes, trainer.plans['transpose_forward']))
         pr.start()
@@ -128,7 +130,7 @@ def preprocess_multithreaded(trainer, list_of_lists, output_files, num_processes
         q.close()
 
 
-def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_threads_preprocessing,
+def predict_cases(model, list_of_lists, output_filenames, img_format, folds, save_npz, num_threads_preprocessing,
                   num_threads_nifti_save, segs_from_prev_stage=None, do_tta=True, mixed_precision=True,
                   overwrite_existing=False,
                   all_in_gpu=False, step_size=0.5, checkpoint_name="model_final_checkpoint",
@@ -160,15 +162,20 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
         dr, f = os.path.split(o)
         if len(dr) > 0:
             maybe_mkdir_p(dr)
-        if not f.endswith(".nii.gz"):
+        if not f.endswith(".nii.gz") and img_format == 'nifti':
             f, _ = os.path.splitext(f)
             f = f + ".nii.gz"
+        else:
+            f = f
         cleaned_output_files.append(join(dr, f))
-
+    
     if not overwrite_existing:
         print("number of cases:", len(list_of_lists))
         # if save_npz=True then we should also check for missing npz files
-        not_done_idx = [i for i, j in enumerate(cleaned_output_files) if (not isfile(j)) or (save_npz and not isfile(j[:-7] + '.npz'))]
+        if img_format == 'nifti':
+            not_done_idx = [i for i, j in enumerate(cleaned_output_files) if (not isfile(j)) or (save_npz and not isfile(j[:-7] + '.npz'))]
+        elif img_format == 'dicom':
+            not_done_idx = [i for i, j in enumerate(cleaned_output_files) if (not isfile(j)) or (save_npz and not isfile(j + '.npz'))]
 
         cleaned_output_files = [cleaned_output_files[i] for i in not_done_idx]
         list_of_lists = [list_of_lists[i] for i in not_done_idx]
@@ -199,7 +206,7 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
         interpolation_order_z = segmentation_export_kwargs['interpolation_order_z']
 
     print("starting preprocessing generator")
-    preprocessing = preprocess_multithreaded(trainer, list_of_lists, cleaned_output_files, num_threads_preprocessing,
+    preprocessing = preprocess_multithreaded(trainer, list_of_lists, cleaned_output_files, img_format, num_threads_preprocessing,
                                              segs_from_prev_stage)
     print("starting prediction...")
     all_output_files = []
@@ -234,7 +241,10 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
             softmax = softmax.transpose([0] + [i + 1 for i in transpose_backward])
 
         if save_npz:
-            npz_file = output_filename[:-7] + ".npz"
+            if img_format == 'nifti':
+                npz_file = output_filename[:-7] + ".npz"
+            elif img_format == 'dicom':
+                npz_file = output_filename + ".npz"
         else:
             npz_file = None
 
@@ -256,10 +266,20 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
         if np.prod(softmax.shape) > (2e9 / bytes_per_voxel * 0.85):  # * 0.85 just to be save
             print(
                 "This output is too large for python process-process communication. Saving output temporarily to disk")
-            np.save(output_filename[:-7] + ".npy", softmax)
-            softmax = output_filename[:-7] + ".npy"
-
-        results.append(pool.starmap_async(save_segmentation_nifti_from_softmax,
+            if img_format == 'nifti':
+                np.save(output_filename[:-7] + ".npy", softmax)
+                softmax = output_filename[:-7] + ".npy"
+            elif img_format == 'dicom':
+                np.save(output_filename + ".npy", softmax)
+                softmax = output_filename + ".npy"
+        if img_format == 'nifti':
+            results.append(pool.starmap_async(save_segmentation_nifti_from_softmax,
+                                          ((softmax, output_filename, dct, interpolation_order, region_class_order,
+                                            None, None,
+                                            npz_file, None, force_separate_z, interpolation_order_z),)
+                                          ))
+        if img_format == 'dicom':
+            results.append(pool.starmap_async(save_segmentation_dicom_from_softmax,
                                           ((softmax, output_filename, dct, interpolation_order, region_class_order,
                                             None, None,
                                             npz_file, None, force_separate_z, interpolation_order_z),)
@@ -269,6 +289,9 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
     _ = [i.get() for i in results]
     # now apply postprocessing
     # first load the postprocessing properties if they are present. Else raise a well visible warning
+    print(output_filenames)
+    post_filenames = [f + '_post' for f in output_filenames]
+    
     if not disable_postprocessing:
         results = []
         pp_file = join(model, "postprocessing.json")
@@ -278,8 +301,15 @@ def predict_cases(model, list_of_lists, output_filenames, folds, save_npz, num_t
             # for_which_classes stores for which of the classes everything but the largest connected component needs to be
             # removed
             for_which_classes, min_valid_obj_size = load_postprocessing(pp_file)
-            results.append(pool.starmap_async(load_remove_save,
+            print(for_which_classes,min_valid_obj_size)
+            if img_format == 'nifti':
+                results.append(pool.starmap_async(load_remove_save,
                                               zip(output_filenames, output_filenames,
+                                                  [for_which_classes] * len(output_filenames),
+                                                  [min_valid_obj_size] * len(output_filenames))))
+            if img_format == 'dicom':
+                results.append(pool.starmap_async(load_remove_save_dcm,
+                                              zip(output_filenames, post_filenames,
                                                   [for_which_classes] * len(output_filenames),
                                                   [min_valid_obj_size] * len(output_filenames))))
             _ = [i.get() for i in results]
@@ -346,7 +376,7 @@ def predict_cases_fast(model, list_of_lists, output_filenames, folds, num_thread
         interpolation_order_z = segmentation_export_kwargs['interpolation_order_z']
 
     print("starting preprocessing generator")
-    preprocessing = preprocess_multithreaded(trainer, list_of_lists, cleaned_output_files, num_threads_preprocessing,
+    preprocessing = preprocess_multithreaded(trainer, list_of_lists, cleaned_output_files, img_format, num_threads_preprocessing,
                                              segs_from_prev_stage)
 
     print("starting prediction...")
@@ -479,7 +509,7 @@ def predict_cases_fastest(model, list_of_lists, output_filenames, folds, num_thr
                                                       checkpoint_name=checkpoint_name)
 
     print("starting preprocessing generator")
-    preprocessing = preprocess_multithreaded(trainer, list_of_lists, cleaned_output_files, num_threads_preprocessing,
+    preprocessing = preprocess_multithreaded(trainer, list_of_lists, cleaned_output_files, img_format, num_threads_preprocessing,
                                              segs_from_prev_stage)
 
     print("starting prediction...")
@@ -565,11 +595,24 @@ def predict_cases_fastest(model, list_of_lists, output_filenames, folds, num_thr
     pool.join()
 
 
-def check_input_folder_and_return_caseIDs(input_folder, expected_num_modalities):
-    print("This model expects %d input modalities for each image" % expected_num_modalities)
-    files = subfiles(input_folder, suffix=".nii.gz", join=False, sort=True)
+def subfolders(folder: str, join: bool = True, sort: bool = True) -> List[str]:
+    if join:
+        l = os.path.join
+    else:
+        l = lambda x, y: y
+    res = [l(folder, i) for i in os.listdir(folder) if os.path.isdir(os.path.join(folder, i))]
+    if sort:
+        res.sort()
+    return res
 
-    maybe_case_ids = np.unique([i[:-12] for i in files])
+def check_input_folder_and_return_caseIDs(input_folder, img_format, expected_num_modalities):
+    print("This model expects %d input modalities for each image" % expected_num_modalities)
+    if img_format == 'nifti':
+        files = subfiles(input_folder, suffix=".nii.gz", join=False, sort=True)
+        maybe_case_ids = np.unique([i[:-12] for i in files])
+    elif img_format == 'dicom':
+        files = subfolders(input_folder, join=False, sort=True)
+        maybe_case_ids = np.unique([i[:-5] for i in files])
 
     remaining = deepcopy(files)
     missing = []
@@ -579,15 +622,22 @@ def check_input_folder_and_return_caseIDs(input_folder, expected_num_modalities)
     # now check if all required files are present and that no unexpected files are remaining
     for c in maybe_case_ids:
         for n in range(expected_num_modalities):
-            expected_output_file = c + "_%04.0d.nii.gz" % n
-            if not isfile(join(input_folder, expected_output_file)):
-                missing.append(expected_output_file)
-            else:
-                remaining.remove(expected_output_file)
+            if img_format == 'nifti':
+                expected_output_file = c + "_%04.0d.nii.gz" % n
+                if not isfile(join(input_folder, expected_output_file)):
+                    missing.append(expected_output_file)
+                else:
+                    remaining.remove(expected_output_file)
+            elif img_format == 'dicom':
+                expected_output_file = c + "_%04.0d" % n
+                if not os.path.isdir(join(input_folder, expected_output_file)):
+                    missing.append(expected_output_file)
+                else:
+                    remaining.remove(expected_output_file)
 
     print("Found %d unique case ids, here are some examples:" % len(maybe_case_ids),
           np.random.choice(maybe_case_ids, min(len(maybe_case_ids), 10)))
-    print("If they don't look right, make sure to double check your filenames. They must end with _0000.nii.gz etc")
+    print("If they don't look right, make sure to double check your filenames. They must end with _0000.nii.gz or _0000.dcm etc")
 
     if len(remaining) > 0:
         print("found %d unexpected remaining files in the folder. Here are some examples:" % len(remaining),
@@ -601,7 +651,7 @@ def check_input_folder_and_return_caseIDs(input_folder, expected_num_modalities)
     return maybe_case_ids
 
 
-def predict_from_folder(model: str, input_folder: str, output_folder: str, folds: Union[Tuple[int], List[int]],
+def predict_from_folder(model: str, input_folder: str, output_folder: str, img_format: str, folds: Union[Tuple[int], List[int]],
                         save_npz: bool, num_threads_preprocessing: int, num_threads_nifti_save: int,
                         lowres_segmentations: Union[str, None],
                         part_id: int, num_parts: int, tta: bool, mixed_precision: bool = True,
@@ -633,13 +683,22 @@ def predict_from_folder(model: str, input_folder: str, output_folder: str, folds
     expected_num_modalities = load_pickle(join(model, "plans.pkl"))['num_modalities']
 
     # check input folder integrity
-    case_ids = check_input_folder_and_return_caseIDs(input_folder, expected_num_modalities)
+    case_ids = check_input_folder_and_return_caseIDs(input_folder, img_format, expected_num_modalities)
+    
+    print(case_ids)
+    print(lowres_segmentations)
 
-    output_files = [join(output_folder, i + ".nii.gz") for i in case_ids]
-    all_files = subfiles(input_folder, suffix=".nii.gz", join=False, sort=True)
-    list_of_lists = [[join(input_folder, i) for i in all_files if i[:len(j)].startswith(j) and
+    if img_format == 'nifti':
+        output_files = [join(output_folder, i + ".nii.gz") for i in case_ids]
+        all_files = subfiles(input_folder, suffix=".nii.gz", join=False, sort=True)
+        list_of_lists = [[join(input_folder, i) for i in all_files if i[:len(j)].startswith(j) and
                       len(i) == (len(j) + 12)] for j in case_ids]
 
+    elif img_format == 'dicom':
+        output_files = [join(output_folder, i) for i in case_ids]
+        all_files = subdirs(input_folder,join=False, sort=True)
+        list_of_lists = [[join(input_folder, i) for i in all_files if i.startswith(j)] for j in case_ids]
+    
     if lowres_segmentations is not None:
         assert isdir(lowres_segmentations), "if lowres_segmentations is not None then it must point to a directory"
         lowres_segmentations = [join(lowres_segmentations, i + ".nii.gz") for i in case_ids]
@@ -655,7 +714,7 @@ def predict_from_folder(model: str, input_folder: str, output_folder: str, folds
         else:
             all_in_gpu = overwrite_all_in_gpu
 
-        return predict_cases(model, list_of_lists[part_id::num_parts], output_files[part_id::num_parts], folds,
+        return predict_cases(model, list_of_lists[part_id::num_parts], output_files[part_id::num_parts], img_format, folds,
                              save_npz, num_threads_preprocessing, num_threads_nifti_save, lowres_segmentations, tta,
                              mixed_precision=mixed_precision, overwrite_existing=overwrite_existing,
                              all_in_gpu=all_in_gpu,
@@ -726,6 +785,9 @@ if __name__ == "__main__":
                                                                                "--num_parts=n (each with a different "
                                                                                "GPU (for example via "
                                                                                "CUDA_VISIBLE_DEVICES=X)")
+    
+    parser.add_argument("--format", type=str, required=False,default="nifti", help="the format of input and output")
+    
     parser.add_argument("--num_parts", type=int, required=False, default=1,
                         help="Used to parallelize the prediction of "
                              "the folder over several GPUs. If you "
@@ -768,6 +830,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     input_folder = args.input_folder
     output_folder = args.output_folder
+    img_format = args.format
     part_id = args.part_id
     num_parts = args.num_parts
     model = args.model_output_folder
@@ -831,7 +894,7 @@ if __name__ == "__main__":
     elif all_in_gpu == "False":
         all_in_gpu = False
 
-    predict_from_folder(model, input_folder, output_folder, folds, save_npz, num_threads_preprocessing,
+    predict_from_folder(model, input_folder, output_folder, img_format, folds, save_npz, num_threads_preprocessing,
                         num_threads_nifti_save, lowres_segmentations, part_id, num_parts, tta,
                         mixed_precision=not args.disable_mixed_precision,
                         overwrite_existing=overwrite, mode=mode, overwrite_all_in_gpu=all_in_gpu, step_size=step_size)

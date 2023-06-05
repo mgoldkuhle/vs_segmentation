@@ -161,7 +161,7 @@ def main():
         trainer.save_latest_only = True  # if false it will not store/overwrite _latest but separate files each
 
     trainer.initialize(not validation_only)
-
+    print('optimizer', trainer.optimizer)
     if find_lr:
         trainer.find_lr()
     else:

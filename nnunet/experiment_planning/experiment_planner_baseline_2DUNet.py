@@ -96,10 +96,12 @@ class ExperimentPlanner2D(ExperimentPlanner):
         all_classes = self.dataset_properties['all_classes']
         modalities = self.dataset_properties['modalities']
         num_modalities = len(list(modalities.keys()))
-
+        
+        print(len(spacings))
         target_spacing = self.get_target_spacing()
         new_shapes = np.array([np.array(i) / target_spacing * np.array(j) for i, j in zip(spacings, sizes)])
-
+        print("target spacing", target_spacing)
+        #print("new_shapes", new_shapes)
         max_spacing_axis = np.argmax(target_spacing)
         remaining_axes = [i for i in list(range(3)) if i != max_spacing_axis]
         self.transpose_forward = [max_spacing_axis] + remaining_axes

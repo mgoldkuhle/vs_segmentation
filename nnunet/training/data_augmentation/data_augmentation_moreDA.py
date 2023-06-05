@@ -180,7 +180,6 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
 
     if regions is not None:
         val_transforms.append(ConvertSegmentationToRegionsTransform(regions, 'target', 'target'))
-
     if deep_supervision_scales is not None:
         if soft_ds:
             assert classes is not None

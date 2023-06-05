@@ -18,7 +18,7 @@ import shutil
 from batchgenerators.utilities.file_and_folder_operations import *
 from multiprocessing import Pool
 from collections import OrderedDict
-
+import sys,os
 
 def create_nonzero_mask(data):
     from scipy.ndimage import binary_fill_holes
@@ -80,6 +80,56 @@ def load_case_from_list_of_files(data_files, seg_file=None):
         seg_npy = None
     return data_npy.astype(np.float32), seg_npy, properties
 
+def load_case_from_list_of_files_dcm(data_files, seg_file=None):
+    assert isinstance(data_files, list) or isinstance(data_files, tuple), "case must be either a list or a tuple"
+    properties = OrderedDict()
+    tags_to_copy = ["0010|0010",  # Patient Name
+                 "0010|0020",  # Patient ID
+                 "0010|0030",  # Patient Birth Date
+                 "0020|000D",  # Study Instance UID, for machine consumption
+                 "0020|0010",  # Study ID, for human consumption
+                 "0008|0050",  # Accession Number
+                 ]
+
+    data_itk = []
+    for f in data_files:
+        dcfiles = os.listdir(f)
+        if len(dcfiles) == 1:
+            reader = sitk.ImageFileReader()
+            reader.SetImageIO('GDCMImageIO')
+            reader.SetFileName(os.path.join(f, dcfiles[0]))
+        else:
+            reader = sitk.ImageSeriesReader()
+            dicom_names = reader.GetGDCMSeriesFileNames(f)
+            reader.SetFileNames(dicom_names)
+        
+        reader.MetaDataDictionaryArrayUpdateOn()
+        reader.LoadPrivateTagsOn()
+        images = reader.Execute()
+        data_itk.append(images)
+    series_tag_values = [(k, reader.GetMetaData(0, k))
+                         for k in tags_to_copy
+                         if reader.HasMetaDataKey(0, k)]
+    #data_itk = [sitk.ReadImage(f) for f in data_files]
+    properties["original_size_of_raw_data"] = np.array(data_itk[0].GetSize())[[2, 1, 0]]
+    properties["original_spacing"] = np.array(data_itk[0].GetSpacing())[[2, 1, 0]]
+    properties["list_of_data_files"] = data_files
+    properties["seg_file"] = seg_file
+    properties["tags"] = series_tag_values
+    properties["itk_origin"] = data_itk[0].GetOrigin()
+    properties["itk_spacing"] = data_itk[0].GetSpacing()
+    properties["itk_direction"] = data_itk[0].GetDirection()
+
+    data_npy = np.vstack([sitk.GetArrayFromImage(d)[None] for d in data_itk])
+    if seg_file is not None:
+        reader = sitk.ImageFileReader()
+        reader.SetImageIO('GDCMImageIO')
+        reader.SetFileName(seg_file)
+        seg_itk = reader.Execute()
+        seg_npy = sitk.GetArrayFromImage(seg_itk)[None].astype(np.float32)
+    else:
+        seg_npy = None
+    return data_npy.astype(np.float32), seg_npy, properties
 
 def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     """
@@ -150,8 +200,12 @@ class ImageCropper(object):
         return data, seg, properties
 
     @staticmethod
-    def crop_from_list_of_files(data_files, seg_file=None):
-        data, seg, properties = load_case_from_list_of_files(data_files, seg_file)
+    def crop_from_list_of_files(data_files, seg_file=None, img_format='nifti'):
+        if img_format == 'nifti':
+            data, seg, properties = load_case_from_list_of_files(data_files, seg_file)
+        elif img_format == 'dicom':
+            data, seg, properties = load_case_from_list_of_files_dcm(data_files, seg_file)
+
         return ImageCropper.crop(data, properties, seg)
 
     def load_crop_save(self, case, case_identifier, overwrite_existing=False):
@@ -198,9 +252,9 @@ class ImageCropper(object):
 
         list_of_args = []
         for j, case in enumerate(list_of_files):
+            
             case_identifier = get_case_identifier(case)
             list_of_args.append((case, case_identifier, overwrite_existing))
-
         p = Pool(self.num_threads)
         p.starmap(self.load_crop_save, list_of_args)
         p.close()

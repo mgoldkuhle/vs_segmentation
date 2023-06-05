@@ -33,14 +33,15 @@ def main():
                            help="Plans name, Default=%s" % default_plans_identifier)
     argparser.add_argument("-val", type=str, required=False, default="validation_raw",
                            help="Validation folder name. Default: validation_raw")
-
+    
+    argparser.add_argument("-f", type=str,required=False,default="")
     args = argparser.parse_args()
     model = args.m
     task = args.t
     trainer = args.tr
     plans = args.pl
     val = args.val
-
+    fold=args.f
     if not task.startswith("Task"):
         task_id = int(task)
         task = convert_id_to_task_name(task_id)
@@ -52,8 +53,12 @@ def main():
             trainer = "nnUNetTrainerV2"
 
     folder = get_output_folder_name(model, task, trainer, plans, None)
-
-    consolidate_folds(folder, val)
+    if fold=="":
+        consolidate_folds(folder, val)
+    else:
+        fold = tuple(map(int,fold.split(',')))
+        print(fold)
+        consolidate_folds(folder,val,folds=fold)
 
 
 if __name__ == "__main__":

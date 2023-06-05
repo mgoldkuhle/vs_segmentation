@@ -17,6 +17,7 @@ from nnunet.experiment_planning.common_utils import get_pool_and_conv_props
 from nnunet.experiment_planning.experiment_planner_baseline_2DUNet import ExperimentPlanner2D
 from nnunet.network_architecture.generic_UNet import Generic_UNet
 from nnunet.paths import *
+from batchgenerators.utilities.file_and_folder_operations import load_pickle
 import numpy as np
 
 
@@ -32,6 +33,7 @@ class ExperimentPlanner2D_v21(ExperimentPlanner2D):
                                  num_modalities, num_classes):
 
         new_median_shape = np.round(original_spacing / current_spacing * original_shape).astype(int)
+        print("new median shape", new_median_shape)
 
         dataset_num_voxels = np.prod(new_median_shape, dtype=np.int64) * num_cases
         input_patch_size = new_median_shape[1:]
@@ -77,7 +79,8 @@ class ExperimentPlanner2D_v21(ExperimentPlanner2D):
 
         batch_size = int(np.floor(ref / here) * 2)
         input_patch_size = new_shp
-
+        
+        print("input patch size",input_patch_size)
         if batch_size < self.unet_min_batch_size:
             raise RuntimeError("This should not happen")
 
@@ -98,3 +101,19 @@ class ExperimentPlanner2D_v21(ExperimentPlanner2D):
             'do_dummy_2D_data_aug': False
         }
         return plan
+    ''' 
+    def load_pretrained_plans(self):
+        classes = self.plans['num_classes']
+        self.plans = load_pickle("/exports/lkeb-hpc/ychen/01_data/nnUnet_data/nnUNet_preprocessed/Task220_Brats_normt1cet2/nnUNetPlansv2.1_plans_2D.pkl")
+        self.plans['num_classes'] = classes
+        self.transpose_forward = self.plans['transpose_forward']
+        self.preprocessor_name = self.plans['preprocessor_name']
+        self.plans_per_stage = self.plans['plans_per_stage']
+        self.save_my_plans()
+        print(self.plans['plans_per_stage'])
+
+    def run_preprocessing(self, num_threads):
+        print("pretrained")
+        self.load_pretrained_plans()
+        super().run_preprocessing(num_threads)
+    ''' 

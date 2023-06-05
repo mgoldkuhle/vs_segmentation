@@ -317,6 +317,10 @@ class DC_and_CE_loss(nn.Module):
         if ignore_label is not None:
             assert not square_dice, 'not implemented'
             ce_kwargs['reduction'] = 'none'
+
+        print('sd', square_dice)
+
+        print('batch_dice', soft_dice_kwargs['batch_dice'])
         self.log_dice = log_dice
         self.weight_dice = weight_dice
         self.weight_ce = weight_ce

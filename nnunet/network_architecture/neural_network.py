@@ -266,9 +266,7 @@ class SegmentationNetwork(NeuralNetwork):
         # our step width is patch_size*step_size at most, but can be narrower. For example if we have image size of
         # 110, patch size of 64 and step_size of 0.5, then we want to make 3 steps starting at coordinate 0, 23, 46
         target_step_sizes_in_voxels = [i * step_size for i in patch_size]
-
         num_steps = [int(np.ceil((i - k) / j)) + 1 for i, j, k in zip(image_size, target_step_sizes_in_voxels, patch_size)]
-
         steps = []
         for dim in range(len(patch_size)):
             # the highest step value for this dimension is
@@ -629,7 +627,6 @@ class SegmentationNetwork(NeuralNetwork):
         # whether the shape is divisible by 2**num_pool as long as the patch size is
         data, slicer = pad_nd_image(x, patch_size, pad_border_mode, pad_kwargs, True, None)
         data_shape = data.shape  # still c, x, y
-
         # compute the steps for sliding window
         steps = self._compute_steps_for_sliding_window(patch_size, data_shape[1:], step_size)
         num_tiles = len(steps[0]) * len(steps[1])

@@ -37,7 +37,7 @@ def get_default_configuration(network, task, network_trainer, plans_identifier=d
     assert network in ['2d', '3d_lowres', '3d_fullres', '3d_cascade_fullres'], \
         "network can only be one of the following: \'3d_lowres\', \'3d_fullres\', \'3d_cascade_fullres\'"
 
-    dataset_directory = join(preprocessing_output_dir, task)
+    dataset_directory = os.path.join(preprocessing_output_dir, task)
 
     if network == '2d':
         plans_file = join(preprocessing_output_dir, task, plans_identifier + "_plans_2D.pkl")
@@ -58,9 +58,9 @@ def get_default_configuration(network, task, network_trainer, plans_identifier=d
 
     trainer_class = recursive_find_python_class([join(*search_in)], network_trainer,
                                                 current_module=base_module)
-
+    print(network_training_output_dir)
     output_folder_name = join(network_training_output_dir, network, task, network_trainer + "__" + plans_identifier)
-
+    print(output_folder_name)
     print("###############################################")
     print("I am running the following nnUNet: %s" % network)
     print("My trainer class is: ", trainer_class)

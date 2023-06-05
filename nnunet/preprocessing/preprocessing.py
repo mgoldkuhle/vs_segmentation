@@ -65,7 +65,7 @@ def resample_patient(data, seg, original_spacing, target_spacing, order_data=3, 
     else:
         shape = np.array(seg[0].shape)
     new_shape = np.round(((np.array(original_spacing) / np.array(target_spacing)).astype(float) * shape)).astype(int)
-
+    
     if force_separate_z is not None:
         do_separate_z = force_separate_z
         if force_separate_z:
@@ -82,7 +82,7 @@ def resample_patient(data, seg, original_spacing, target_spacing, order_data=3, 
         else:
             do_separate_z = False
             axis = None
-
+    
     if axis is not None:
         if len(axis) == 3:
             # every axis has the spacing, this should never happen, why is this code here?
@@ -159,7 +159,9 @@ def resample_data_or_seg(data, new_shape, is_seg, axis=None, order=3, do_separat
                     # The following few lines are blatantly copied and modified from sklearn's resize()
                     rows, cols, dim = new_shape[0], new_shape[1], new_shape[2]
                     orig_rows, orig_cols, orig_dim = reshaped_data.shape
-
+                    
+                    #print("in separate_z", rows,cols,dim)
+                    #print("in separate_z", orig_rows,orig_cols,orig_dim)
                     row_scale = float(orig_rows) / rows
                     col_scale = float(orig_cols) / cols
                     dim_scale = float(orig_dim) / dim
@@ -242,7 +244,6 @@ class GenericPreprocessor(object):
             'spacing_transposed': original_spacing_transposed,
             'data.shape (data is transposed)': data.shape
         }
-
         # remove nans
         data[np.isnan(data)] = 0
 
@@ -253,6 +254,7 @@ class GenericPreprocessor(object):
             'spacing': target_spacing,
             'data.shape (data is resampled)': data.shape
         }
+        print("resample_and_normalize",target_spacing)
         print("before:", before, "\nafter: ", after, "\n")
 
         if seg is not None:  # hippocampus 243 has one voxel with -2 as label. wtf?
@@ -307,8 +309,8 @@ class GenericPreprocessor(object):
                     data[c] = (data[c] - mn) / (std + 1e-8)
         return data, seg, properties
 
-    def preprocess_test_case(self, data_files, target_spacing, seg_file=None, force_separate_z=None):
-        data, seg, properties = ImageCropper.crop_from_list_of_files(data_files, seg_file)
+    def preprocess_test_case(self, data_files, img_format, target_spacing, seg_file=None, force_separate_z=None):
+        data, seg, properties = ImageCropper.crop_from_list_of_files(data_files, seg_file, img_format)
 
         data = data.transpose((0, *[i + 1 for i in self.transpose_forward]))
         seg = seg.transpose((0, *[i + 1 for i in self.transpose_forward]))
@@ -323,7 +325,7 @@ class GenericPreprocessor(object):
 
         data = data.transpose((0, *[i + 1 for i in self.transpose_forward]))
         seg = seg.transpose((0, *[i + 1 for i in self.transpose_forward]))
-
+        print('run internal', target_spacing)
         data, seg, properties = self.resample_and_normalize(data, target_spacing,
                                                             properties, seg, force_separate_z)
 
@@ -591,7 +593,8 @@ class PreprocessorFor2D(GenericPreprocessor):
         maybe_mkdir_p(output_folder)
         all_args = []
         num_stages = len(target_spacings)
-
+        
+        print(list_of_cropped_npz_files)
         # we need to know which classes are present in this dataset so that we can precompute where these classes are
         # located. This is needed for oversampling foreground
         all_classes = load_pickle(join(input_folder_with_cropped_npz, 'dataset_properties.pkl'))['all_classes']

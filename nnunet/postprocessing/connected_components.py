@@ -22,10 +22,10 @@ from nnunet.configuration import default_num_threads
 from nnunet.evaluation.evaluator import aggregate_scores
 from scipy.ndimage import label
 import SimpleITK as sitk
-from nnunet.utilities.sitk_stuff import copy_geometry
+from nnunet.utilities.sitk_stuff import copy_geometry, writeSlices
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
-
+import sys,os,time
 
 def load_remove_save(input_file: str, output_file: str, for_which_classes: list,
                      minimum_valid_object_size: dict = None):
@@ -34,7 +34,7 @@ def load_remove_save(input_file: str, output_file: str, for_which_classes: list,
     img_in = sitk.ReadImage(input_file)
     img_npy = sitk.GetArrayFromImage(img_in)
     volume_per_voxel = float(np.prod(img_in.GetSpacing(), dtype=np.float64))
-
+    
     image, largest_removed, kept_size = remove_all_but_the_largest_connected_component(img_npy, for_which_classes,
                                                                                        volume_per_voxel,
                                                                                        minimum_valid_object_size)
@@ -44,6 +44,56 @@ def load_remove_save(input_file: str, output_file: str, for_which_classes: list,
     sitk.WriteImage(img_out_itk, output_file)
     return largest_removed, kept_size
 
+def load_remove_save_dcm(input_file: str, output_file: str, for_which_classes: list,
+                     minimum_valid_object_size: dict = None):
+    # Only objects larger than minimum_valid_object_size will be removed. Keys in minimum_valid_object_size must
+    # match entries in for_which_classes
+    tags_to_copy = ["0010|0010",  # Patient Name
+                 "0010|0020",  # Patient ID
+                 "0010|0030",  # Patient Birth Date
+                 "0020|000D",  # Study Instance UID, for machine consumption
+                 "0020|0010",  # Study ID, for human consumption
+                 "0008|0050",  # Accession Number
+                 ]
+    reader = sitk.ImageSeriesReader()
+    reader.MetaDataDictionaryArrayUpdateOn()
+    reader.LoadPrivateTagsOn()
+    dicom_names = reader.GetGDCMSeriesFileNames(input_file)
+    reader.SetFileNames(dicom_names)
+    img_in = reader.Execute()
+    #img_in = sitk.ReadImage(input_file)
+    img_npy = sitk.GetArrayFromImage(img_in)
+    
+    series_tag_values = [(k, reader.GetMetaData(0, k))
+                         for k in tags_to_copy
+                         if reader.HasMetaDataKey(0, k)]
+    
+    volume_per_voxel = float(np.prod(img_in.GetSpacing(), dtype=np.float64))
+
+    image, largest_removed, kept_size = remove_all_but_the_largest_connected_component(img_npy, for_which_classes,
+                                                                                       volume_per_voxel,
+                                                                                       minimum_valid_object_size)
+    # print(input_file, "kept:", kept_size)
+
+    img_out_itk = sitk.GetImageFromArray(image)
+    img_out_itk = copy_geometry(img_out_itk, img_in)
+    modification_time = time.strftime("%H%M%S")
+    modification_date = time.strftime("%Y%m%d")
+    direction = img_out_itk.GetDirection()
+    series_tag_values += [("0008|0031",modification_time), # Series Time
+                  ("0008|0021",modification_date), # Series Date
+                  ("0008|0008","DERIVED\\SECONDARY"), # Image Type
+                  ("0020|000e", "1.2.826.0.1.3680043.2.1125."+modification_date+".1"+modification_time), # Series Instance UID
+                  ("0020|0037", '\\'.join(map(str, (direction[0], direction[3], direction[6],# Image Orientation (Patient)
+                                                    direction[1],direction[4],direction[7])))),
+                  ("0008|103e", "segmentation mask")] # Series Description
+    if not os.path.isdir(output_file):
+        os.mkdir(output_file)
+
+    # Write slices to output directory
+    list(map(lambda i: writeSlices(series_tag_values, output_file, img_out_itk, i), range(img_out_itk.GetDepth())))
+    
+    return largest_removed, kept_size
 
 def remove_all_but_the_largest_connected_component(image: np.ndarray, for_which_classes: list, volume_per_voxel: float,
                                                    minimum_valid_object_size: dict = None):

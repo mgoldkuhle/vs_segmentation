@@ -30,7 +30,7 @@ from nnunet.training.dataloading.dataset_loading import unpack_dataset
 from nnunet.training.network_training.nnUNetTrainer import nnUNetTrainer
 from nnunet.utilities.nd_softmax import softmax_helper
 from sklearn.model_selection import KFold
-from torch import nn
+from torch import nn, norm
 from torch.cuda.amp import autocast
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from batchgenerators.utilities.file_and_folder_operations import *
@@ -120,7 +120,9 @@ class nnUNetTrainerV2(nnUNetTrainer):
 
             self.initialize_network()
             self.initialize_optimizer_and_scheduler()
-
+            model_parameters = filter(lambda p: p.requires_grad, self.network.parameters())
+            params = sum([np.prod(p.size()) for p in model_parameters])
+            print("parameters numer", params)
             assert isinstance(self.network, (SegmentationNetwork, nn.DataParallel))
         else:
             self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
@@ -151,12 +153,17 @@ class nnUNetTrainerV2(nnUNetTrainer):
         dropout_op_kwargs = {'p': 0, 'inplace': True}
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
+        #print(self.num_input_channels, self.base_num_features, self.num_classes,\
+        #        len(self.net_num_pool_op_kernel_sizes), self.conv_per_stage, 2, conv_op, norm, norm_op_kwargs, dropout_op,\
+        #        dropout_op_kwargs, net_nonlin, net_nonlin_kwargs, self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes)
+
         self.network = Generic_UNet(self.num_input_channels, self.base_num_features, self.num_classes,
                                     len(self.net_num_pool_op_kernel_sizes),
                                     self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
                                     dropout_op_kwargs,
                                     net_nonlin, net_nonlin_kwargs, True, False, lambda x: x, InitWeights_He(1e-2),
                                     self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True)
+        #print(self.network)
         if torch.cuda.is_available():
             self.network.cuda()
         self.network.inference_apply_nonlin = softmax_helper
